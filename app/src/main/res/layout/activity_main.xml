@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/shield_bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="RKN SHIELD"
+            android:textColor="@color/shield_text"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Обход выключен"
+            android:textColor="@color/shield_muted"
+            android:textSize="16sp" />
+
+        <Button
+            android:id="@+id/toggleButton"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:layout_marginTop="24dp"
+            android:text="ОБХОД ВКЛ"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="Приложения через обход"
+            android:textColor="@color/shield_text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <CheckBox
+            android:id="@+id/telegramCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:checked="true"
+            android:text="Telegram"
+            android:textColor="@color/shield_text" />
+
+        <CheckBox
+            android:id="@+id/whatsappCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="WhatsApp"
+            android:textColor="@color/shield_text" />
+
+        <CheckBox
+            android:id="@+id/instagramCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="Instagram"
+            android:textColor="@color/shield_text" />
+
+        <CheckBox
+            android:id="@+id/youtubeCheck"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:text="YouTube"
+            android:textColor="@color/shield_text" />
+
+        <Button
+            android:id="@+id/importConfigButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="24dp"
+            android:text="Импортировать WireGuard .conf" />
+
+        <TextView
+            android:id="@+id/configStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="Конфигурация не загружена"
+            android:textColor="@color/shield_muted" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:text="v2 использует полноценный защищённый туннель. Через него идут только отмеченные и установленные приложения."
+            android:textColor="@color/shield_muted"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
