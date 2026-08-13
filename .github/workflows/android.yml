@@ -1,11 +1,11 @@
-name: RKNShield YouTube Local DPI APK
+name: ShieldBreaker Android APK
 
 on:
   push:
     branches: [ "main" ]
     paths:
       - ".github/workflows/android.yml"
-      - "RKN_PATCHES.md"
+      - "shieldbreaker_patch.py"
   workflow_dispatch:
 
 permissions:
@@ -14,30 +14,25 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout RKNShield wrapper
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
+      - name: Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK, NDK and CMake
+      - name: Native build tools
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            "platforms;android-36" \
-            "build-tools;35.0.0" \
-            "ndk;27.0.12077973" \
-            "cmake;3.22.1"
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 
-      - name: Fetch pinned ByeByeDPI source
+      - name: Fetch network engine source
         run: |
           rm -rf upstream
           mkdir upstream
@@ -47,85 +42,18 @@ jobs:
           git fetch --depth 1 origin ffda4fa93d94472217c75e51b45fdd18f966c0af
           git checkout --detach FETCH_HEAD
           git submodule update --init --recursive --depth 1
-          test "$(git rev-parse HEAD)" = "ffda4fa93d94472217c75e51b45fdd18f966c0af"
 
-      - name: Apply RKNShield YouTube preset
-        working-directory: upstream
+      - name: Apply ShieldBreaker app layer
+        run: python3 shieldbreaker_patch.py
+
+      - name: Verify app identity
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
+          grep -q 'com.shieldbreaker.android' upstream/app/build.gradle.kts
+          grep -q 'versionName = "1.0"' upstream/app/build.gradle.kts
+          grep -q 'switch_youtube' upstream/app/src/main/res/layout/activity_main.xml
+          grep -q 'shieldbreaker_logo' upstream/app/src/main/AndroidManifest.xml
 
-          # App id/version.
-          gradle = Path("app/build.gradle.kts")
-          text = gradle.read_text(encoding="utf-8")
-          text = text.replace('applicationId = "io.github.romanvht.byedpi"', 'applicationId = "com.rknshield.android"')
-          text = text.replace('versionCode = 1770', 'versionCode = 3100')
-          text = text.replace('versionName = "1.7.7"', 'versionName = "3.1-youtube"')
-          gradle.write_text(text, encoding="utf-8")
-
-          # Brand visible strings.
-          for strings in Path("app/src/main/res").glob("values*/strings.xml"):
-              text = strings.read_text(encoding="utf-8")
-              text = text.replace("ByeByeDPI", "RKNShield")
-              strings.write_text(text, encoding="utf-8")
-
-          ru_strings = Path("app/src/main/res/values/strings.xml")
-          text = ru_strings.read_text(encoding="utf-8")
-          text = text.replace('<string name="title_test">Подбор стратегий</string>', '<string name="title_test">Подбор YouTube</string>')
-          text = text.replace('<string name="summary_test">Тестирование работы подготовленных аргументов командной строки</string>', '<string name="summary_test">Проверка стратегий для YouTube и активных доменов</string>')
-          ru_strings.write_text(text, encoding="utf-8")
-
-          # Default command: Android-oriented YouTube TLS profile plus a general fallback group.
-          prefs = Path("app/src/main/java/io/github/romanvht/byedpi/utility/PreferencesUtils.kt")
-          text = prefs.read_text(encoding="utf-8")
-          old = 'private const val DEFAULT_CMD_ARGS = "-o1 -a1 -r-5+se"'
-          new = 'private const val DEFAULT_CMD_ARGS = "-Kt,h -H:\\"{list:youtube} googlevideo.com ytimg.com ggpht.com googleapis.com googleusercontent.com gstatic.com\\" -o1 -s1+s -s3+s -s6+s -s9+s -s12+s -s15+s -s20+s -s30+s -a1 -An -Kt,h -o1 -r-5+se -a1 -At,r,s -d1 -n \\"google.com\\" -Qr -f-1 -r2 -a1 -An"'
-          if old not in text:
-              raise SystemExit("DEFAULT_CMD_ARGS marker not found")
-          text = text.replace(old, new)
-
-          old_apps = '''fun SharedPreferences.getSelectedApps(): List<String> {
-              return getStringSet("selected_apps", emptySet())?.toList() ?: emptyList()
-          }'''
-          new_apps = '''fun SharedPreferences.getSelectedApps(): List<String> {
-              val defaults = setOf(
-                  "com.google.android.youtube",
-                  "org.telegram.messenger",
-                  "org.telegram.messenger.web",
-                  "com.whatsapp",
-                  "com.whatsapp.w4b",
-                  "com.instagram.android"
-              )
-              return getStringSet("selected_apps", defaults)?.toList() ?: defaults.toList()
-          }'''
-          if old_apps not in text:
-              raise SystemExit("getSelectedApps marker not found")
-          text = text.replace(old_apps, new_apps)
-          prefs.write_text(text, encoding="utf-8")
-
-          # Default app filter = whitelist so only target apps are routed through local DPI.
-          main_settings = Path("app/src/main/res/xml/main_settings.xml")
-          text = main_settings.read_text(encoding="utf-8")
-          text = text.replace('android:key="applist_type"\n            android:icon="@drawable/ic_filter_list"\n            android:title="@string/applist_setting"\n            android:entries="@array/applist_types"\n            android:entryValues="@array/applist_types_entries"\n            android:summary="%s"\n            android:defaultValue="disable"',
-                              'android:key="applist_type"\n            android:icon="@drawable/ic_filter_list"\n            android:title="@string/applist_setting"\n            android:entries="@array/applist_types"\n            android:entryValues="@array/applist_types_entries"\n            android:summary="%s"\n            android:defaultValue="whitelist"')
-          main_settings.write_text(text, encoding="utf-8")
-
-          vpn = Path("app/src/main/java/io/github/romanvht/byedpi/services/ByeDpiVpnService.kt")
-          text = vpn.read_text(encoding="utf-8")
-          text = text.replace('builder.setSession("ByeDPI")', 'builder.setSession("RKNShield")')
-          text = text.replace('getStringNotNull("applist_type", "disable")', 'getStringNotNull("applist_type", "whitelist")')
-          vpn.write_text(text, encoding="utf-8")
-          PY
-
-      - name: Verify YouTube patch
-        working-directory: upstream
-        run: |
-          grep -q 'versionName = "3.1-youtube"' app/build.gradle.kts
-          grep -q 'com.google.android.youtube' app/src/main/java/io/github/romanvht/byedpi/utility/PreferencesUtils.kt
-          grep -q 'googlevideo.com' app/src/main/java/io/github/romanvht/byedpi/utility/PreferencesUtils.kt
-          grep -q 'android:defaultValue="whitelist"' app/src/main/res/xml/main_settings.xml
-
-      - name: Build installable universal APK
+      - name: Build APK
         working-directory: upstream
         run: |
           chmod +x gradlew
@@ -134,30 +62,24 @@ jobs:
       - name: Prepare APK
         run: |
           APK="$(find upstream/app/build/outputs/apk -type f -name '*universal*debug*.apk' -print -quit)"
-          if [ -z "$APK" ]; then
-            APK="$(find upstream/app/build/outputs/apk -type f -name '*debug*.apk' -print -quit)"
-          fi
+          if [ -z "$APK" ]; then APK="$(find upstream/app/build/outputs/apk -type f -name '*debug*.apk' -print -quit)"; fi
           test -n "$APK"
-          cp "$APK" RKNShield-v3.1-youtube.apk
-          ls -lh RKNShield-v3.1-youtube.apk
+          cp "$APK" ShieldBreaker-v1.apk
+          sha256sum ShieldBreaker-v1.apk
 
-      - name: Upload APK artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RKNShield-v3.1-youtube-apk
-          path: RKNShield-v3.1-youtube.apk
+          name: ShieldBreaker-v1-apk
+          path: ShieldBreaker-v1.apk
 
-      - name: Publish GitHub Release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="v3.1-youtube"
-          NOTES="RKNShield v3.1 YouTube: локальный ByeDPI-режим без .conf и удалённого VPN. По умолчанию через локальный DPI направляются YouTube, Telegram, WhatsApp и Instagram. Добавлен YouTube-oriented Android preset и встроенный подбор стратегий по YouTube/googlevideo доменам. Основано на ByeByeDPI GPL-3.0, pinned commit ffda4fa93d94472217c75e51b45fdd18f966c0af."
+          TAG="shieldbreaker-v1.0"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" RKNShield-v3.1-youtube.apk --clobber
+            gh release upload "$TAG" ShieldBreaker-v1.apk --clobber
           else
-            gh release create "$TAG" RKNShield-v3.1-youtube.apk \
-              --title "RKNShield v3.1 YouTube" \
-              --notes "$NOTES" \
-              --target "$GITHUB_SHA"
+            gh release create "$TAG" ShieldBreaker-v1.apk --title "ShieldBreaker v1.0" --notes "ShieldBreaker v1.0 Android APK. Original ShieldBreaker interface and branding. Open-source component licenses are preserved in source." --target "$GITHUB_SHA"
           fi
