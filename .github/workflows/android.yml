@@ -67,6 +67,27 @@ jobs:
           layout.write_text(text, encoding='utf-8')
           PY
 
+      - name: Fix hidden legacy strategy function
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt')
+          text = p.read_text(encoding='utf-8')
+          pattern = r'''    private fun updateStrategyButton\(\) \{.*?\n    \}\n\n    private fun showStrategyPicker\(\)'''
+          replacement = '''    private fun updateStrategyButton() {
+              binding.strategyButton.visibility = View.GONE
+              binding.cmdButtonsRow.visibility = View.GONE
+          }
+
+          private fun showStrategyPicker()'''
+          fixed, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'updateStrategyButton patch count={count}')
+          p.write_text(fixed, encoding='utf-8')
+          PY
+
       - name: Verify app identity
         run: |
           grep -q 'com.shieldbreaker.android' upstream/app/build.gradle.kts
@@ -74,6 +95,7 @@ jobs:
           grep -q 'switch_youtube' upstream/app/src/main/res/layout/activity_main.xml
           grep -q 'shieldbreaker_logo' upstream/app/src/main/AndroidManifest.xml
           grep -q 'shieldbreaker_power' upstream/app/src/main/res/layout/activity_main.xml
+          grep -q 'private fun updateStrategyButton()' upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt
 
       - name: Build APK
         working-directory: upstream
