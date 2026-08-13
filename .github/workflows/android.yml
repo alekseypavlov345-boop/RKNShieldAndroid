@@ -72,7 +72,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           p = Path('upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt')
           text = p.read_text(encoding='utf-8')
           pattern = r'''    private fun updateStrategyButton\(\) \{.*?\n    \}\n\n    private fun showStrategyPicker\(\)'''
@@ -88,6 +87,45 @@ jobs:
           p.write_text(fixed, encoding='utf-8')
           PY
 
+      - name: Replace status UI with ShieldBreaker controls
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path('upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt')
+          text = p.read_text(encoding='utf-8')
+          pattern = r'''    private fun updateStatus\(\) \{.*?\n    \}\n\n    private fun updateStrategyButton\(\)'''
+          replacement = '''    private fun updateStatus() {
+              val (status, _) = appStatus
+              Log.i(TAG, "Updating ShieldBreaker status: $status")
+
+              val statusText = findViewById<TextView>(R.id.status_text)
+              val powerCard = findViewById<com.google.android.material.card.MaterialCardView>(R.id.status_button_card)
+              val powerIcon = findViewById<android.widget.ImageView>(R.id.status_button_icon)
+
+              when (status) {
+                  AppStatus.Halted -> {
+                      powerCard.setCardBackgroundColor(android.graphics.Color.parseColor("#0B1B2E"))
+                      powerCard.strokeColor = android.graphics.Color.parseColor("#1E90FF")
+                      powerIcon.clearColorFilter()
+                      statusText.setText(R.string.vpn_disconnected)
+                  }
+                  AppStatus.Running -> {
+                      powerCard.setCardBackgroundColor(android.graphics.Color.parseColor("#0B1B2E"))
+                      powerCard.strokeColor = android.graphics.Color.parseColor("#22A3FF")
+                      powerIcon.setColorFilter(android.graphics.Color.WHITE)
+                      statusText.setText(R.string.vpn_connected)
+                  }
+              }
+          }
+
+          private fun updateStrategyButton()'''
+          fixed, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'updateStatus patch count={count}')
+          p.write_text(fixed, encoding='utf-8')
+          PY
+
       - name: Verify app identity
         run: |
           grep -q 'com.shieldbreaker.android' upstream/app/build.gradle.kts
@@ -95,7 +133,7 @@ jobs:
           grep -q 'switch_youtube' upstream/app/src/main/res/layout/activity_main.xml
           grep -q 'shieldbreaker_logo' upstream/app/src/main/AndroidManifest.xml
           grep -q 'shieldbreaker_power' upstream/app/src/main/res/layout/activity_main.xml
-          grep -q 'private fun updateStrategyButton()' upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt
+          grep -q 'Updating ShieldBreaker status' upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt
 
       - name: Build APK
         working-directory: upstream
