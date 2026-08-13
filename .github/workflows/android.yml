@@ -1,8 +1,11 @@
-name: Android APK
+name: RKNShield Local DPI APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/android.yml"
+      - "RKN_PATCHES.md"
   workflow_dispatch:
 
 permissions:
@@ -13,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout RKNShield wrapper
         uses: actions/checkout@v4
 
       - name: Set up Java 17
@@ -25,37 +28,79 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
+      - name: Install SDK, NDK and CMake
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "ndk;27.0.12077973" \
+            "cmake;3.22.1"
 
-      - name: Set up Gradle 9.5.0
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "9.5.0"
+      - name: Fetch pinned ByeByeDPI source
+        run: |
+          rm -rf upstream
+          mkdir upstream
+          cd upstream
+          git init
+          git remote add origin https://github.com/romanvht/ByeByeDPI.git
+          git fetch --depth 1 origin ffda4fa93d94472217c75e51b45fdd18f966c0af
+          git checkout --detach FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+          test "$(git rev-parse HEAD)" = "ffda4fa93d94472217c75e51b45fdd18f966c0af"
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug --stacktrace
+      - name: Apply RKNShield branding and package
+        working-directory: upstream
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Prepare release APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk RKNShield-v2.apk
+          gradle = Path("app/build.gradle.kts")
+          text = gradle.read_text(encoding="utf-8")
+          text = text.replace('applicationId = "io.github.romanvht.byedpi"', 'applicationId = "com.rknshield.android"')
+          text = text.replace('versionCode = 1770', 'versionCode = 3000')
+          text = text.replace('versionName = "1.7.7"', 'versionName = "3.0-local-dpi"')
+          gradle.write_text(text, encoding="utf-8")
+
+          for strings in Path("app/src/main/res").glob("values*/strings.xml"):
+              text = strings.read_text(encoding="utf-8")
+              text = text.replace("ByeByeDPI", "RKNShield")
+              strings.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Build installable universal APK
+        working-directory: upstream
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Prepare APK
+        run: |
+          APK="$(find upstream/app/build/outputs/apk -type f -name '*universal*debug*.apk' -print -quit)"
+          if [ -z "$APK" ]; then
+            APK="$(find upstream/app/build/outputs/apk -type f -name '*debug*.apk' -print -quit)"
+          fi
+          test -n "$APK"
+          cp "$APK" RKNShield-v3-local-dpi.apk
+          ls -lh RKNShield-v3-local-dpi.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RKNShield-v2-apk
-          path: RKNShield-v2.apk
+          name: RKNShield-v3-local-dpi-apk
+          path: RKNShield-v3-local-dpi.apk
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v2.0 >/dev/null 2>&1; then
-            gh release upload v2.0 RKNShield-v2.apk --clobber
+          TAG="v3.0-local-dpi"
+          NOTES="RKNShield v3: локальный ByeDPI-совместимый DPI-обход без WireGuard-сервера и без .conf. Android VPN API используется только для локального перенаправления трафика. Основано на ByeByeDPI (GPL-3.0), pinned commit ffda4fa93d94472217c75e51b45fdd18f966c0af."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" RKNShield-v3-local-dpi.apk --clobber
           else
-            gh release create v2.0 RKNShield-v2.apk \
-              --title "RKNShield v2.0" \
-              --notes "Готовый APK для установки на Android 7.0 и новее." \
+            gh release create "$TAG" RKNShield-v3-local-dpi.apk \
+              --title "RKNShield v3 Local DPI" \
+              --notes "$NOTES" \
               --target "$GITHUB_SHA"
           fi
