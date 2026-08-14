@@ -46,14 +46,14 @@ jobs:
       - name: Apply ShieldBreaker app layer
         run: python3 shieldbreaker_patch.py
 
-      - name: Set ShieldBreaker v1.0.2
+      - name: Set ShieldBreaker v1.0.3
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('upstream/app/build.gradle.kts')
           text = p.read_text(encoding='utf-8')
-          text = text.replace('versionCode = 4000', 'versionCode = 4002')
-          text = text.replace('versionName = "1.0"', 'versionName = "1.0.2"')
+          text = text.replace('versionCode = 4000', 'versionCode = 4003')
+          text = text.replace('versionName = "1.0"', 'versionName = "1.0.3"')
           p.write_text(text, encoding='utf-8')
           PY
 
@@ -153,8 +153,8 @@ jobs:
       - name: Verify app identity and startup fix
         run: |
           grep -q 'com.shieldbreaker.android' upstream/app/build.gradle.kts
-          grep -q 'versionCode = 4002' upstream/app/build.gradle.kts
-          grep -q 'versionName = "1.0.2"' upstream/app/build.gradle.kts
+          grep -q 'versionCode = 4003' upstream/app/build.gradle.kts
+          grep -q 'versionName = "1.0.3"' upstream/app/build.gradle.kts
           grep -q 'switch_youtube' upstream/app/src/main/res/layout/activity_main.xml
           grep -q 'shieldbreaker_logo' upstream/app/src/main/AndroidManifest.xml
           grep -q 'shieldbreaker_power' upstream/app/src/main/res/layout/activity_main.xml
@@ -175,8 +175,8 @@ jobs:
           APK="$(find upstream/app/build/outputs/apk -type f -name '*universal*debug*.apk' -print -quit)"
           if [ -z "$APK" ]; then APK="$(find upstream/app/build/outputs/apk -type f -name '*debug*.apk' -print -quit)"; fi
           test -n "$APK"
-          cp "$APK" ShieldBreaker-v1.0.2.apk
-          sha256sum ShieldBreaker-v1.0.2.apk
+          cp "$APK" ShieldBreaker-v1.0.3.apk
+          sha256sum ShieldBreaker-v1.0.3.apk
 
       - name: Install Android emulator image
         run: |
@@ -184,43 +184,67 @@ jobs:
           echo no | avdmanager create avd -n shieldbreaker_test -k "system-images;android-35;google_apis;x86_64" --force
 
       - name: Launch smoke test on Android
+        timeout-minutes: 7
         run: |
-          sudo chmod 666 /dev/kvm || true
-          nohup emulator -avd shieldbreaker_test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > /tmp/shieldbreaker-emulator.log 2>&1 &
-          adb wait-for-device
-          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 2; done'
-          adb install -r ShieldBreaker-v1.0.2.apk
-          adb shell am force-stop com.shieldbreaker.android || true
-          adb logcat -c
-          adb shell monkey -p com.shieldbreaker.android -c android.intent.category.LAUNCHER 1
+          set -euo pipefail
+          EMULATOR="$ANDROID_HOME/emulator/emulator"
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          test -x "$EMULATOR"
+          test -x "$ADB"
+          ACCEL_ARGS=""
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm || true
+          else
+            ACCEL_ARGS="-accel off"
+          fi
+          nohup "$EMULATOR" -avd shieldbreaker_test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect $ACCEL_ARGS > /tmp/shieldbreaker-emulator.log 2>&1 &
+          EMU_PID=$!
+          echo "Emulator PID: $EMU_PID"
+          if ! timeout 120 "$ADB" wait-for-device; then
+            echo 'ADB did not see the emulator'
+            cat /tmp/shieldbreaker-emulator.log || true
+            exit 1
+          fi
+          if ! timeout 180 bash -c 'until [ "$("$0" shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done' "$ADB"; then
+            echo 'Android emulator did not finish booting'
+            cat /tmp/shieldbreaker-emulator.log || true
+            "$ADB" devices -l || true
+            exit 1
+          fi
+          "$ADB" install -r ShieldBreaker-v1.0.3.apk
+          "$ADB" shell am force-stop com.shieldbreaker.android || true
+          "$ADB" logcat -c
+          "$ADB" shell monkey -p com.shieldbreaker.android -c android.intent.category.LAUNCHER 1
           sleep 6
-          PID="$(adb shell pidof com.shieldbreaker.android | tr -d '\r')"
+          PID="$("$ADB" shell pidof com.shieldbreaker.android | tr -d '\r')"
           echo "ShieldBreaker PID: $PID"
           if [ -z "$PID" ]; then
             echo 'ShieldBreaker process died after launch'
-            adb logcat -d '*:E' | tail -250
+            "$ADB" logcat -d '*:E' | tail -300
             exit 1
           fi
-          if adb logcat -d | grep -A20 -B5 'FATAL EXCEPTION' | grep -q 'com.shieldbreaker.android'; then
+          if "$ADB" logcat -d | grep -A25 -B8 'FATAL EXCEPTION' | grep -q 'com.shieldbreaker.android'; then
             echo 'Fatal exception detected for ShieldBreaker'
-            adb logcat -d '*:E' | tail -250
+            "$ADB" logcat -d '*:E' | tail -300
             exit 1
           fi
-          adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -10 || true
+          "$ADB" shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | tail -10 || true
+          kill "$EMU_PID" || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShieldBreaker-v1.0.2-apk
-          path: ShieldBreaker-v1.0.2.apk
+          name: ShieldBreaker-v1.0.3-apk
+          path: ShieldBreaker-v1.0.3.apk
 
       - name: Publish release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="shieldbreaker-v1.0.2"
+          TAG="shieldbreaker-v1.0.3"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" ShieldBreaker-v1.0.2.apk --clobber
+            gh release upload "$TAG" ShieldBreaker-v1.0.3.apk --clobber
           else
-            gh release create "$TAG" ShieldBreaker-v1.0.2.apk --title "ShieldBreaker v1.0.2" --notes "Fixes the startup crash caused by the removed legacy toolbar. This build is installed and launch-smoke-tested on an Android 15 emulator before release. Open-source component licenses are preserved in source." --target "$GITHUB_SHA"
+            gh release create "$TAG" ShieldBreaker-v1.0.3.apk --title "ShieldBreaker v1.0.3" --notes "Fixes the startup crash caused by the removed legacy toolbar. APK is installed and launch-smoke-tested on Android 15 in CI before artifact upload. Open-source component licenses are preserved in source." --target "$GITHUB_SHA"
           fi
