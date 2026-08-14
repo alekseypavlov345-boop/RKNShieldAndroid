@@ -1,0 +1,86 @@
+name: ShieldBreaker Launch Smoke Test
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/shieldbreaker-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download ShieldBreaker 1.0.4 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 31798003802 -n ShieldBreaker-v1.0.4-apk
+          test -f ShieldBreaker-v1.0.4.apk
+          sha256sum ShieldBreaker-v1.0.4.apk
+
+      - name: Create Android 15 AVD in fixed path
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "emulator" "platform-tools" "system-images;android-35;google_apis;x86_64"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          AVD_DIR="$ANDROID_AVD_HOME/shieldbreaker_test.avd"
+          echo no | avdmanager create avd -n shieldbreaker_test -k "system-images;android-35;google_apis;x86_64" -p "$AVD_DIR" --force
+          cat > "$ANDROID_AVD_HOME/shieldbreaker_test.ini" <<EOF
+          avd.ini.encoding=UTF-8
+          path=$AVD_DIR
+          target=android-35
+          EOF
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/emulator/emulator" -list-avds
+          test -f "$ANDROID_AVD_HOME/shieldbreaker_test.ini"
+          test -f "$AVD_DIR/config.ini"
+
+      - name: Install and launch ShieldBreaker
+        timeout-minutes: 7
+        run: |
+          set -euo pipefail
+          EMULATOR="$ANDROID_HOME/emulator/emulator"
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          mkdir -p smoke-diagnostics
+          ACCEL_ARGS=""
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm || true; else ACCEL_ARGS="-accel off"; fi
+          nohup "$EMULATOR" -avd shieldbreaker_test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect $ACCEL_ARGS > smoke-diagnostics/emulator.log 2>&1 &
+          EMU_PID=$!
+          trap '"$ADB" logcat -d > smoke-diagnostics/logcat.txt 2>&1 || true; "$ADB" shell dumpsys activity activities > smoke-diagnostics/activity.txt 2>&1 || true; kill "$EMU_PID" 2>/dev/null || true' EXIT
+          timeout 120 "$ADB" wait-for-device
+          timeout 180 bash -c 'until [ "$("$0" shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done' "$ADB"
+          "$ADB" install -r ShieldBreaker-v1.0.4.apk | tee smoke-diagnostics/install.txt
+          "$ADB" shell am force-stop com.shieldbreaker.android || true
+          "$ADB" logcat -c
+          "$ADB" shell monkey -p com.shieldbreaker.android -c android.intent.category.LAUNCHER 1 | tee smoke-diagnostics/launch.txt
+          sleep 8
+          "$ADB" logcat -d > smoke-diagnostics/logcat.txt
+          PID="$("$ADB" shell pidof com.shieldbreaker.android | tr -d '\r')"
+          echo "ShieldBreaker PID: $PID" | tee smoke-diagnostics/result.txt
+          test -n "$PID"
+          if grep -A40 -B10 'FATAL EXCEPTION' smoke-diagnostics/logcat.txt | grep -q -E 'com\.shieldbreaker\.android|io\.github\.romanvht\.byedpi'; then
+            echo 'Fatal exception detected' | tee -a smoke-diagnostics/result.txt
+            exit 1
+          fi
+          "$ADB" shell dumpsys activity activities > smoke-diagnostics/activity.txt
+          grep -E 'mResumedActivity|topResumedActivity' smoke-diagnostics/activity.txt | tee -a smoke-diagnostics/result.txt || true
+          echo 'SHIELDBREAKER_LAUNCH_OK' | tee -a smoke-diagnostics/result.txt
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShieldBreaker-v1.0.4-smoke-diagnostics
+          path: smoke-diagnostics/
