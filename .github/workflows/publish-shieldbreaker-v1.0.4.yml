@@ -1,0 +1,53 @@
+name: Publish ShieldBreaker v1.0.4
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - ".github/workflows/publish-shieldbreaker-v1.0.4.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download tested APK artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9218210485/zip" \
+            -o apk-artifact.zip
+          mkdir apk-artifact
+          unzip -q apk-artifact.zip -d apk-artifact
+          APK="$(find apk-artifact -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          cp "$APK" ShieldBreaker-v1.0.4.apk
+          sha256sum ShieldBreaker-v1.0.4.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="shieldbreaker-v1.0.4"
+          NOTES="ShieldBreaker v1.0.4\n\nИсправлен crash при запуске из-за старого вызова toolbar после обновления главного экрана. APK успешно установлен и запущен на Android 15 в автоматическом smoke-test; FATAL EXCEPTION не обнаружен.\n\nOpen-source component licenses are preserved in source."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ShieldBreaker-v1.0.4.apk --clobber
+          else
+            gh release create "$TAG" ShieldBreaker-v1.0.4.apk \
+              --title "ShieldBreaker v1.0.4" \
+              --notes "$NOTES" \
+              --target "$GITHUB_SHA"
+          fi
