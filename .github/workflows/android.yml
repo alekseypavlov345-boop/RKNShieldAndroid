@@ -46,6 +46,17 @@ jobs:
       - name: Apply ShieldBreaker app layer
         run: python3 shieldbreaker_patch.py
 
+      - name: Set ShieldBreaker v1.0.1
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('upstream/app/build.gradle.kts')
+          text = p.read_text(encoding='utf-8')
+          text = text.replace('versionCode = 4000', 'versionCode = 4001')
+          text = text.replace('versionName = "1.0"', 'versionName = "1.0.1"')
+          p.write_text(text, encoding='utf-8')
+          PY
+
       - name: Add ShieldBreaker UI icons
         run: |
           python3 - <<'PY'
@@ -126,14 +137,32 @@ jobs:
           p.write_text(fixed, encoding='utf-8')
           PY
 
-      - name: Verify app identity
+      - name: Disable legacy toolbar on ShieldBreaker home
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt')
+          text = p.read_text(encoding='utf-8')
+          marker = '        setupToolbar()\n'
+          if marker not in text:
+              raise SystemExit('setupToolbar marker not found')
+          text = text.replace(marker, '', 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify app identity and startup fix
         run: |
           grep -q 'com.shieldbreaker.android' upstream/app/build.gradle.kts
-          grep -q 'versionName = "1.0"' upstream/app/build.gradle.kts
+          grep -q 'versionCode = 4001' upstream/app/build.gradle.kts
+          grep -q 'versionName = "1.0.1"' upstream/app/build.gradle.kts
           grep -q 'switch_youtube' upstream/app/src/main/res/layout/activity_main.xml
           grep -q 'shieldbreaker_logo' upstream/app/src/main/AndroidManifest.xml
           grep -q 'shieldbreaker_power' upstream/app/src/main/res/layout/activity_main.xml
           grep -q 'Updating ShieldBreaker status' upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt
+          if grep -q '^[[:space:]]*setupToolbar()' upstream/app/src/main/java/io/github/romanvht/byedpi/activities/MainActivity.kt; then
+            echo 'Legacy toolbar call still present'
+            exit 1
+          fi
 
       - name: Build APK
         working-directory: upstream
@@ -146,22 +175,22 @@ jobs:
           APK="$(find upstream/app/build/outputs/apk -type f -name '*universal*debug*.apk' -print -quit)"
           if [ -z "$APK" ]; then APK="$(find upstream/app/build/outputs/apk -type f -name '*debug*.apk' -print -quit)"; fi
           test -n "$APK"
-          cp "$APK" ShieldBreaker-v1.apk
-          sha256sum ShieldBreaker-v1.apk
+          cp "$APK" ShieldBreaker-v1.0.1.apk
+          sha256sum ShieldBreaker-v1.0.1.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ShieldBreaker-v1-apk
-          path: ShieldBreaker-v1.apk
+          name: ShieldBreaker-v1.0.1-apk
+          path: ShieldBreaker-v1.0.1.apk
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="shieldbreaker-v1.0"
+          TAG="shieldbreaker-v1.0.1"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" ShieldBreaker-v1.apk --clobber
+            gh release upload "$TAG" ShieldBreaker-v1.0.1.apk --clobber
           else
-            gh release create "$TAG" ShieldBreaker-v1.apk --title "ShieldBreaker v1.0" --notes "ShieldBreaker v1.0 Android APK. Original ShieldBreaker interface and branding. Open-source component licenses are preserved in source." --target "$GITHUB_SHA"
+            gh release create "$TAG" ShieldBreaker-v1.0.1.apk --title "ShieldBreaker v1.0.1" --notes "Fixes startup crash caused by the removed legacy toolbar. ShieldBreaker local DPI bypass interface and branding. Open-source component licenses are preserved in source." --target "$GITHUB_SHA"
           fi
